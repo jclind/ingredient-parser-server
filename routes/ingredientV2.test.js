@@ -1,8 +1,8 @@
 const express = require('express')
 const request = require('supertest')
 
-jest.mock('../services/ingredientStore')
-const { findIngredient } = require('../services/ingredientStore')
+jest.mock('../services/resolveIngredient')
+const { resolveIngredient } = require('../services/resolveIngredient')
 
 const v2Routes = require('./ingredientV2')
 
@@ -27,8 +27,8 @@ const stored = {
 beforeEach(() => jest.clearAllMocks())
 
 describe('GET /v2/ingredient/:name', () => {
-  test('returns the neutral projection when found', async () => {
-    findIngredient.mockResolvedValue(stored)
+  test('returns the neutral projection when resolved', async () => {
+    resolveIngredient.mockResolvedValue(stored)
     const res = await request(buildApp()).get('/v2/ingredient/flour')
     expect(res.status).toBe(200)
     expect(res.body).toEqual({
@@ -43,23 +43,27 @@ describe('GET /v2/ingredient/:name', () => {
     })
   })
 
-  test('returns data: null on a cache miss', async () => {
-    findIngredient.mockResolvedValue(null)
+  test('returns data: null on a miss', async () => {
+    resolveIngredient.mockResolvedValue(null)
     const res = await request(buildApp()).get('/v2/ingredient/unobtainium')
     expect(res.status).toBe(200)
     expect(res.body).toEqual({ data: null })
   })
 
-  test('passes the name param to findIngredient', async () => {
-    findIngredient.mockResolvedValue(null)
+  test('passes the name and the configured api key to resolveIngredient', async () => {
+    process.env.SPOONACULAR_API_KEY = 'test-key'
+    resolveIngredient.mockResolvedValue(null)
     await request(buildApp()).get('/v2/ingredient/all-purpose%20flour')
-    expect(findIngredient).toHaveBeenCalledWith({}, 'all-purpose flour')
+    expect(resolveIngredient).toHaveBeenCalledWith({}, 'all-purpose flour', {
+      apiKey: 'test-key',
+    })
+    delete process.env.SPOONACULAR_API_KEY
   })
 
-  test('returns 500 when findIngredient throws', async () => {
-    findIngredient.mockRejectedValue(new Error('db error'))
+  test('returns 500 when resolveIngredient throws', async () => {
+    resolveIngredient.mockRejectedValue(new Error('spoonacular down'))
     const res = await request(buildApp()).get('/v2/ingredient/flour')
     expect(res.status).toBe(500)
-    expect(res.body).toHaveProperty('error', 'db error')
+    expect(res.body).toHaveProperty('error', 'spoonacular down')
   })
 })
