@@ -3,6 +3,7 @@ const express = require('express')
 const cors = require('cors')
 const { MongoClient } = require('mongodb')
 const ingredientRoutes = require('./routes/ingredient')
+const ingredientV2Routes = require('./routes/ingredientV2')
 
 const app = express()
 const PORT = process.env.PORT || 4001
@@ -13,6 +14,7 @@ app.use(express.json())
 app.get('/health', (req, res) => res.json({ status: 'ok', service: 'ingredient-parser' }))
 
 app.use('/ingredient', ingredientRoutes)
+app.use('/v2/ingredient', ingredientV2Routes)
 
 const MONGO_URI = process.env.MONGO_URI
 
