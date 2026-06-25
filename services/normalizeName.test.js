@@ -28,4 +28,21 @@ describe('normalizeName', () => {
   test('handles an empty string', () => {
     expect(normalizeName('')).toBe('')
   })
+
+  test('collapses internal whitespace runs to a single space', () => {
+    expect(normalizeName('all   purpose    flour')).toBe('all purpose flour')
+    expect(normalizeName('all\tpurpose\nflour')).toBe('all purpose flour')
+  })
+
+  test('hyphen + whitespace variants collapse to the same key', () => {
+    expect(normalizeName('All-Purpose  Flour')).toBe('all purpose flour')
+    expect(normalizeName('all purpose flour')).toBe('all purpose flour')
+    expect(normalizeName('  all--purpose   flour  ')).toBe('all purpose flour')
+  })
+
+  test('non-string input → empty string', () => {
+    expect(normalizeName(null)).toBe('')
+    expect(normalizeName(undefined)).toBe('')
+    expect(normalizeName(42)).toBe('')
+  })
 })

@@ -16,9 +16,17 @@
 
 const { findIngredient, writeIngredient } = require('./ingredientStore')
 const { fetchIngredient } = require('./spoonacular')
+const { normalizeName } = require('./normalizeName')
 
 const MAX_NAME_LENGTH = 200
-const NEGATIVE_TTL_MS = 10 * 60 * 1000
+// A genuine "Spoonacular searched and found nothing" is a stable fact — cache it
+// long so we don't re-bill the paid upstream for the same dead name.
+const NO_MATCH_TTL_MS = 10 * 60 * 1000
+// A transient/config upstream failure (timeout / network / 429 / 5xx / bad key /
+// quota) is recoverable — cache it only briefly so a momentary Spoonacular blip
+// doesn't blackhole a genuinely fetchable ingredient for the full no-match
+// window, while still throttling a hot retry loop.
+const TRANSIENT_TTL_MS = 60 * 1000
 
 // module-level default; injectable for tests
 const defaultNegativeCache = new Map()
@@ -45,7 +53,10 @@ async function resolveIngredient(
   if (!apiKey) return null
   if (typeof name !== 'string' || name.length > MAX_NAME_LENGTH) return null
 
-  const key = name.toLowerCase().trim()
+  // Key the negative cache with the SAME normalization the store uses, so
+  // hyphen/whitespace variants of one name ("all-purpose flour" /
+  // "all purpose flour") share a single entry instead of each re-billing.
+  const key = normalizeName(name)
   const t = now()
   const expiry = negativeCache.get(key)
   if (expiry !== undefined) {
@@ -57,22 +68,24 @@ async function resolveIngredient(
   try {
     fetched = await fetchIngredient(name, { apiKey, fetchImpl, timeoutMs })
   } catch (err) {
-    // Transient/config upstream failure → degrade to a miss (not a 500).
+    // Transient/config upstream failure → degrade to a miss (not a 500) and
+    // remember it only briefly (recoverable).
     console.warn(`[v2] Spoonacular fetch failed for "${name}": ${err.message}`)
-    negativeCache.set(key, t + NEGATIVE_TTL_MS)
+    negativeCache.set(key, t + TRANSIENT_TTL_MS)
     return null
   }
 
-  // No match, or a malformed doc we shouldn't cache or serve.
+  // No match, or a malformed doc we shouldn't cache or serve. A clean "no match"
+  // is a stable absence → cache it long.
   if (!fetched || fetched.id == null || !fetched.name) {
-    negativeCache.set(key, t + NEGATIVE_TTL_MS)
+    negativeCache.set(key, t + NO_MATCH_TTL_MS)
     return null
   }
 
   // Best-effort write-back. Register the query name and (if different) the
   // canonical name, so both resolve to a cache hit next time.
   await safeWrite(db, name, fetched)
-  if (typeof fetched.name === 'string' && fetched.name.toLowerCase().trim() !== key) {
+  if (typeof fetched.name === 'string' && normalizeName(fetched.name) !== key) {
     await safeWrite(db, fetched.name, fetched)
   }
 

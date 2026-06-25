@@ -84,6 +84,58 @@ describe('resolveIngredient', () => {
     expect(fetchIngredient).toHaveBeenCalledTimes(2)
   })
 
+  test('a transient upstream failure is cached only briefly (60s short TTL)', async () => {
+    findIngredient.mockResolvedValue(null)
+    fetchIngredient.mockRejectedValue(new Error('Spoonacular request timed out'))
+    const shared = new Map()
+    let clock = 1000
+    const now = () => clock
+    await resolveIngredient(db, 'flour', { apiKey: 'k', negativeCache: shared, now })
+    // key-level: a transient failure pins the SHORT TTL exactly (not the 10-min one)
+    expect(shared.get('flour')).toBe(1000 + 60 * 1000)
+    clock += 90 * 1000 // 90s: past the 60s transient TTL, still inside the 10-min no-match TTL
+    await resolveIngredient(db, 'flour', { apiKey: 'k', negativeCache: shared, now })
+    expect(fetchIngredient).toHaveBeenCalledTimes(2) // retried — a blip doesn't blackhole it
+  })
+
+  test('a genuine no-match is cached long (10-min TTL, outlives the transient window)', async () => {
+    findIngredient.mockResolvedValue(null)
+    fetchIngredient.mockResolvedValue(null)
+    const shared = new Map()
+    let clock = 1000
+    const now = () => clock
+    await resolveIngredient(db, 'zzz', { apiKey: 'k', negativeCache: shared, now })
+    // key-level: a clean no-match pins the LONG TTL exactly (distinguishes it from transient)
+    expect(shared.get('zzz')).toBe(1000 + 10 * 60 * 1000)
+    clock += 90 * 1000 // past the transient TTL but well within the 10-min no-match TTL
+    await resolveIngredient(db, 'zzz', { apiKey: 'k', negativeCache: shared, now })
+    expect(fetchIngredient).toHaveBeenCalledTimes(1) // a dead name stays negative-cached
+  })
+
+  test('negative cache keys on the normalized name (hyphen/space variants share one entry)', async () => {
+    findIngredient.mockResolvedValue(null)
+    fetchIngredient.mockResolvedValue(null)
+    const shared = new Map()
+    await resolveIngredient(db, 'all-purpose flour', { apiKey: 'k', negativeCache: shared })
+    await resolveIngredient(db, 'all purpose flour', { apiKey: 'k', negativeCache: shared })
+    await resolveIngredient(db, 'All  Purpose  Flour', { apiKey: 'k', negativeCache: shared })
+    expect(fetchIngredient).toHaveBeenCalledTimes(1) // all collapse to one negative-cache key
+    // key-level: prove the single entry is keyed by the normalized form
+    expect([...shared.keys()]).toEqual(['all purpose flour'])
+  })
+
+  test('canonical write-back dedups hyphen/space variants via normalizeName', async () => {
+    findIngredient.mockResolvedValue(null)
+    // query and canonical name differ only by a hyphen → same normalized name.
+    // The old key (name.toLowerCase().trim()) would double-register; normalizeName
+    // collapses both to "all purpose flour", so only one write occurs.
+    fetchIngredient.mockResolvedValue({ id: 1, name: 'all purpose flour' })
+    writeIngredient.mockResolvedValue({ status: 'created' })
+    await resolveIngredient(db, 'all-purpose flour', opts())
+    expect(writeIngredient).toHaveBeenCalledTimes(1)
+    expect(writeIngredient).toHaveBeenCalledWith(db, 'all-purpose flour', expect.anything())
+  })
+
   test('rejects an over-long name before hitting Spoonacular', async () => {
     findIngredient.mockResolvedValue(null)
     const r = await resolveIngredient(db, 'x'.repeat(201), opts())
