@@ -13,7 +13,7 @@ The Prepify ingredient service: a lightweight Express + MongoDB **cache** for in
 ## Commands
 
 ```bash
-npm test          # jest + supertest — 77 tests across 8 suites
+npm test          # jest + supertest — 82 tests across 9 suites
 npm run dev       # nodemon on PORT (default 4001); needs MONGO_URI
 npm start         # production start
 ```
@@ -68,13 +68,14 @@ Hardening (it's a paid, unauthenticated upstream):
 - **Length cap:** names > 200 chars are rejected before any fetch.
 - **Canonical registration:** both the query name and Spoonacular's canonical name are registered, so a later lookup by the canonical term is a cache hit, not a re-fetch.
 
-**Still recommended at the edge (not in this code):** request rate limiting on the `/v2` route and a Spoonacular daily-quota cap — the negative cache only helps *repeated* names; a flood of *distinct* names still costs ~1 search call each. The `/v2` route is unauthenticated.
+**Rate limiting (in code):** the `/v2` route is wrapped by `services/rateLimit.js` — a dependency-free, per-IP fixed-window limiter (default 120 req / 60s, tunable via `RATE_LIMIT_MAX` / `RATE_LIMIT_WINDOW_MS`). In-memory/per-process; `app.set('trust proxy', 1)` makes `req.ip` the real client behind Railway's edge. For multi-instance/distributed limits, swap in `express-rate-limit` + a Redis store. **Still recommended at the platform level:** a Spoonacular daily-quota cap as a hard money ceiling (the limiter caps rate, not total spend).
 
 ## Key files
 - `index.js` — Express setup, Mongo connect, index creation, route mounting
 - `services/mapToNeutral.js` — v2 neutral projection (+ `.test.js`)
 - `services/spoonacular.js` — Phase 2 Spoonacular fetch (+ `.test.js`)
 - `services/resolveIngredient.js` — cache-or-fetch orchestration (+ `.test.js`)
+- `services/rateLimit.js` — per-IP rate-limit middleware for /v2 (+ `.test.js`)
 - `services/ingredientStore.js` — DB read/write (+ `.test.js`)
 - `routes/ingredientV2.js` — `GET /v2/ingredient/:name` (+ `.test.js`)
 - `routes/ingredient.js` — v1 routes (+ `.test.js`)

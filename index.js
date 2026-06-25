@@ -4,9 +4,14 @@ const cors = require('cors')
 const { MongoClient } = require('mongodb')
 const ingredientRoutes = require('./routes/ingredient')
 const ingredientV2Routes = require('./routes/ingredientV2')
+const { rateLimit } = require('./services/rateLimit')
 
 const app = express()
 const PORT = process.env.PORT || 4001
+
+// Behind Railway's edge proxy — trust the first hop so req.ip reflects the real
+// client (X-Forwarded-For), which the rate limiter keys on.
+app.set('trust proxy', 1)
 
 app.use(cors())
 app.use(express.json())
@@ -22,7 +27,15 @@ app.get('/health', (req, res) =>
 )
 
 app.use('/ingredient', ingredientRoutes)
-app.use('/v2/ingredient', ingredientV2Routes)
+// Rate-limit the paid /v2 path (Spoonacular-backed). Tunable via env.
+app.use(
+  '/v2/ingredient',
+  rateLimit({
+    windowMs: Number(process.env.RATE_LIMIT_WINDOW_MS) || 60_000,
+    max: Number(process.env.RATE_LIMIT_MAX) || 120,
+  }),
+  ingredientV2Routes
+)
 
 const MONGO_URI = process.env.MONGO_URI
 
