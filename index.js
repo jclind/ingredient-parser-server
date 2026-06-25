@@ -11,7 +11,15 @@ const PORT = process.env.PORT || 4001
 app.use(cors())
 app.use(express.json())
 
-app.get('/health', (req, res) => res.json({ status: 'ok', service: 'ingredient-parser' }))
+app.get('/health', (req, res) =>
+  res.json({
+    status: 'ok',
+    service: 'ingredient-parser',
+    // boolean only — never the key itself; tells us if the running process can
+    // see SPOONACULAR_API_KEY (i.e. whether Phase 2 server-side fetch is active)
+    spoonacular: !!process.env.SPOONACULAR_API_KEY,
+  })
+)
 
 app.use('/ingredient', ingredientRoutes)
 app.use('/v2/ingredient', ingredientV2Routes)
